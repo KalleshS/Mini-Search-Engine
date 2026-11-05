@@ -3,7 +3,7 @@ import queue
 import threading
 import httpx
 
-from crawler.fetcher import fetch_page, normalize_url
+from crawler.fetcher import fetch_page, normalize_url,can_fetch
 
 
 # ==========================================
@@ -77,7 +77,9 @@ def crawl(seed_url, max_workers=4, max_pages=10):
                     f"[{threading.current_thread().name}] "
                     f"Crawling: {url}"
                 )
-
+                if not can_fetch(url):
+                    print(f"Blocked by robots.txt:{url}")
+                    continue
                 # Fetch webpage
                 title, links, page_text = fetch_page(url)
                 # Save result

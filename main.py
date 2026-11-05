@@ -1,7 +1,7 @@
 
 from crawler.engine import crawl
 from crawler.indexer import build_index, search, display_results
-
+from database.db import create_table, insert_page, get_all_pages
 
 # ==========================================
 # MINI SEARCH ENGINE
@@ -19,6 +19,30 @@ if __name__ == "__main__":
         max_workers=4,
         max_pages=10
     )
+        # STEP 1.5: Store crawled webpages in SQLite
+    print("\nSaving webpages to SQLite Database...")
+
+    create_table()
+
+    for url, data in crawled_pages.items():
+
+        insert_page(
+            url,
+            data["title"],
+            data["content"]
+        )
+
+    print("All crawled webpages saved successfully!")
+        # Verify stored webpages
+    print("\nVerifying SQLite Database...")
+
+    stored_pages = get_all_pages()
+
+    print("Total webpages stored:", len(stored_pages))
+
+    for page in stored_pages:
+        print("\nURL:", page[1])
+        print("Title:", page[2])
 
     # STEP 2: Build inverted index
     print("\nBuilding Inverted Index...")

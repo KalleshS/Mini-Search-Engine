@@ -1,10 +1,16 @@
-
+import threading
 import httpx
 import socket
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlsplit, urlunsplit
 import ipaddress
 import re
+import urllib.robotparser
+# Robots.txt cache
+robots_cache = {}
+
+# Lock protects the shared cache
+robots_lock = threading.Lock()
 
 
 # ==========================================
@@ -384,3 +390,48 @@ print(
     "Private IP:",
     is_public_host("http://192.168.1.1")
 )
+
+
+def can_fetch(url, user_agent="MiniSearchEngine/1.0"):
+
+    parsed_url = urlsplit(url)
+
+    robots_url = (
+        f"{parsed_url.scheme}://{parsed_url.netloc}/robots.txt"
+    )
+
+    # Use website origin as the cache key
+    domain = f"{parsed_url.scheme}://{parsed_url.netloc}"
+
+    try:
+        with robots_lock:
+
+            # Check whether rules are already cached
+            if domain not in robots_cache:
+
+                robot_parser = urllib.robotparser.RobotFileParser()
+
+                robot_parser.set_url(robots_url)
+                robot_parser.read()
+
+                # Store rules in cache
+                robots_cache[domain] = robot_parser
+
+                print(f"Robots.txt downloaded: {domain}")
+
+            else:
+                robot_parser = robots_cache[domain]
+
+        # Check permission using cached rules
+        allowed = robot_parser.can_fetch(user_agent, url)
+
+        print(
+            f"Robots check: {url} -> "
+            f"{'Allowed' if allowed else 'Blocked'}"
+        )
+
+        return allowed
+
+    except Exception as error:
+        print("Robots.txt check failed:", error)
+        return False
