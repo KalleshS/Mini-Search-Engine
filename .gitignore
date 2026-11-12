@@ -11,3 +11,4 @@ __pycache__/
 # Environment variables and secrets
 .env
 .ipynb_checkpoints/
+search_index.json

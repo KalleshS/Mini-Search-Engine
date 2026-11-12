@@ -1,9 +1,11 @@
 
+import time
+from urllib.parse import urlsplit
 import queue
 import threading
 import httpx
 
-from crawler.fetcher import fetch_page, normalize_url,can_fetch
+from crawler.fetcher import fetch_page, normalize_url, can_fetch
 
 
 # ==========================================
@@ -12,17 +14,47 @@ from crawler.fetcher import fetch_page, normalize_url,can_fetch
 
 def crawl(seed_url, max_workers=4, max_pages=10):
 
-    # Queue containing URLs waiting to be crawled
     url_queue = queue.Queue()
 
-    # Shared data structures
     discovered = set()
     visited = set()
     results = {}
     errors = {}
 
-    # Lock protects shared data structures
     lock = threading.Lock()
+
+    # Domain-level request throttling
+    last_request_time = {}
+    domain_locks = {}
+    domain_locks_guard = threading.Lock()
+
+    # ======================================
+    # DOMAIN THROTTLING
+    # ======================================
+
+    def wait_for_domain(url, delay=1.0):
+
+        domain = urlsplit(url).netloc.lower()
+
+        with domain_locks_guard:
+
+            if domain not in domain_locks:
+                domain_locks[domain] = threading.Lock()
+
+            domain_lock = domain_locks[domain]
+
+        with domain_lock:
+
+            current_time = time.monotonic()
+
+            previous_time = last_request_time.get(domain, 0)
+
+            elapsed = current_time - previous_time
+
+            if elapsed < delay:
+                time.sleep(delay - elapsed)
+
+            last_request_time[domain] = time.monotonic()
 
     # ======================================
     # ADD URL TO QUEUE
@@ -30,18 +62,17 @@ def crawl(seed_url, max_workers=4, max_pages=10):
 
     def add_url(url):
 
-        normalized = normalize_url(url)
+        try:
+            normalized = normalize_url(url)
 
-        if not normalized:
+        except ValueError:
             return
 
         with lock:
 
-            # Avoid duplicate URLs
             if normalized in discovered:
                 return
 
-            # Limit total discovered URLs
             if len(discovered) >= max_pages:
                 return
 
@@ -49,7 +80,6 @@ def crawl(seed_url, max_workers=4, max_pages=10):
 
         url_queue.put(normalized)
 
-    # Add starting URL
     add_url(seed_url)
 
     # ======================================
@@ -60,57 +90,74 @@ def crawl(seed_url, max_workers=4, max_pages=10):
 
         while True:
 
-            # Get URL from queue
             url = url_queue.get()
-
-            # Stop signal
-            if url is None:
-                url_queue.task_done()
-                break
-
-            with lock:
-                visited.add(url)
 
             try:
 
-                print(
-                    f"[{threading.current_thread().name}] "
-                    f"Crawling: {url}"
-                )
-                if not can_fetch(url):
-                    print(f"Blocked by robots.txt:{url}")
-                    continue
-                # Fetch webpage
-                title, links, page_text = fetch_page(url)
-                # Save result
-                with lock:
-                    results[url] = {
-                        "title": title,
-                        "links": links,
-                        "content":page_text
-                    }
-
-                # Add discovered links to queue
-                for link in links:
-                    add_url(link)
-
-            except (httpx.HTTPError, ValueError) as error:
+                # Stop signal
+                if url is None:
+                    return
 
                 with lock:
-                    errors[url] = str(error)
 
-                print(f"Failed: {url} -> {error}")
+                    if len(visited) >= max_pages:
+                        continue
 
-            except Exception as error:
+                    if url in visited:
+                        continue
 
-                with lock:
-                    errors[url] = str(error)
+                    visited.add(url)
 
-                print(f"Unexpected error: {url} -> {error}")
+                try:
+
+                    print(
+                        f"[{threading.current_thread().name}] "
+                        f"Crawling: {url}"
+                    )
+
+                    # Check robots.txt
+                    if not can_fetch(url):
+                        print(f"Blocked by robots.txt: {url}")
+                        continue
+
+                    # Apply domain throttling
+                    wait_for_domain(url)
+
+                    # Fetch webpage
+                    title, links, page_text = fetch_page(url)
+
+                    # Save result
+                    with lock:
+
+                        results[url] = {
+                            "title": title,
+                            "links": links,
+                            "content": page_text
+                        }
+
+                    print(f"Successfully crawled: {url}")
+
+                    # Add discovered links
+                    for link in links:
+                        add_url(link)
+
+                except (httpx.HTTPError, ValueError) as error:
+
+                    with lock:
+                        errors[url] = str(error)
+
+                    print(f"Failed: {url} -> {error}")
+
+                except Exception as error:
+
+                    with lock:
+                        errors[url] = str(error)
+
+                    print(f"Unexpected error: {url} -> {error}")
 
             finally:
 
-                # Mark current task as completed
+                # Mark task as completed
                 url_queue.task_done()
 
     # ======================================
@@ -129,19 +176,20 @@ def crawl(seed_url, max_workers=4, max_pages=10):
         threads.append(thread)
         thread.start()
 
-    # Wait until all crawling tasks are completed
+    # Wait for crawling tasks
     url_queue.join()
 
-    # Send stop signals to workers
+    # Stop worker threads
     for _ in range(max_workers):
         url_queue.put(None)
 
-    # Wait for all threads to finish
+    url_queue.join()
+
     for thread in threads:
         thread.join()
 
     # ======================================
-    # DISPLAY RESULTS
+    # CRAWLING SUMMARY
     # ======================================
 
     print("\n========== CRAWLING SUMMARY ==========")
