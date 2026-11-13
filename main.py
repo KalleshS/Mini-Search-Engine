@@ -1,10 +1,67 @@
 
+import math
+
 from crawler.engine import crawl
 from crawler.indexer import build_index, search, display_results
-
 from database.db import create_table, insert_page, get_all_pages
-
 from crawler.index_cache import save_index, load_index
+
+
+# ==========================================
+# PAGINATION FUNCTION
+# ==========================================
+
+def display_paginated_results(results, query, page_size=5):
+
+    if not results:
+        print("\nNo matching webpages found.")
+        return
+
+    total_results = len(results)
+    total_pages = math.ceil(total_results / page_size)
+
+    current_page = 1
+
+    while True:
+
+        start = (current_page - 1) * page_size
+        end = start + page_size
+
+        print(f"\n========== PAGE {current_page}/{total_pages} ==========")
+
+        display_results(results[start:end], query)
+
+        print(f"\nTotal results: {total_results}")
+
+        if total_pages == 1:
+            break
+
+        print("\nOptions:")
+        print("n - Next page")
+        print("p - Previous page")
+        print("q - Back to search")
+
+        choice = input("Enter choice: ").lower().strip()
+
+        if choice == "n":
+
+            if current_page < total_pages:
+                current_page += 1
+            else:
+                print("You are already on the last page.")
+
+        elif choice == "p":
+
+            if current_page > 1:
+                current_page -= 1
+            else:
+                print("You are already on the first page.")
+
+        elif choice == "q":
+            break
+
+        else:
+            print("Invalid choice. Try again.")
 
 
 # ==========================================
@@ -95,7 +152,6 @@ if __name__ == "__main__":
             total_documents
         ) = build_index(crawled_pages)
 
-        # Save index to JSON cache
         save_index(
             inverted_index,
             documents,
@@ -206,4 +262,5 @@ if __name__ == "__main__":
                 total_documents
             )
 
-            display_results(results)
+            display_paginated_results(results, query)
+
